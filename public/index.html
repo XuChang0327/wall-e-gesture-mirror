@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>瓦力 - 体感模仿</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --bg: #0f1117; --surface: #1a1d27; --surface-2: #22262f; --border: #2d3140;
+      --text: #e4e6ed; --text-dim: #8b8fa3; --accent: #22d3ee;
+      --green: #34d399; --red: #f87171; --yellow: #fbbf24;
+    }
+    body { font-family: -apple-system, sans-serif; background: var(--bg); color: var(--text); height: 100vh; overflow: hidden; }
+
+    .layout { display: flex; height: 100vh; }
+
+    /* 左侧面板 */
+    .sidebar { width: 320px; min-width: 320px; background: var(--surface); border-right: 1px solid var(--border); display: flex; flex-direction: column; transition: margin-left 0.3s; overflow-y: auto; }
+    .sidebar.collapsed { margin-left: -320px; }
+    .sidebar-header { padding: 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
+    .sidebar-header h1 { font-size: 1.1rem; font-weight: 600; }
+    .sidebar-content { flex: 1; padding: 14px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+
+    .toggle-btn { position: fixed; left: 0; top: 50%; transform: translateY(-50%); z-index: 100; background: var(--surface-2); border: 1px solid var(--border); border-left: none; color: var(--text-dim); width: 24px; height: 48px; border-radius: 0 8px 8px 0; cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 0.75rem; transition: left 0.3s; }
+    .toggle-btn.shifted { left: 320px; }
+
+    /* 右侧摄像头区域 */
+    .main { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 20px; position: relative; }
+    .video-wrap { position: relative; width: 100%; max-width: 800px; aspect-ratio: 4/3; background: var(--surface); border: 1px solid var(--border); border-radius: 16px; overflow: hidden; }
+    .video-wrap video, .video-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+    .placeholder { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text-dim); font-size: 0.9rem; text-align: center; padding: 20px; }
+
+    .gesture-overlay { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; gap: 16px; background: rgba(15,17,23,0.85); border: 1px solid var(--border); border-radius: 12px; padding: 10px 20px; }
+    .arm-icon { display: flex; flex-direction: column; align-items: center; gap: 4px; }
+    .arm-icon span { font-size: 0.7rem; color: var(--text-dim); }
+    .arm-bar { width: 28px; height: 50px; border-radius: 6px; background: var(--border); transition: background 0.2s, transform 0.2s; }
+    .arm-bar.up { background: var(--green); transform: translateY(-8px); }
+    #leftFlatBar.flat { background: var(--accent); transform: translateX(-8px); }
+    #rightFlatBar.flat { background: var(--accent); transform: translateX(8px); }
+
+    /* 卡片样式 */
+    .card { background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 12px; }
+    .card-title { font-size: 0.7rem; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 8px; }
+
+    .status-row { display: flex; align-items: center; gap: 6px; font-size: 0.82rem; color: var(--text-dim); padding: 4px 0; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--red); flex-shrink: 0; }
+    .dot.ok { background: var(--green); }
+    .dot.loading { background: var(--yellow); animation: pulse 1s infinite; }
+    @keyframes pulse { 50% { opacity: 0.4; } }
+
+    .stat-row { display: flex; justify-content: space-between; font-size: 0.8rem; padding: 3px 0; border-bottom: 1px solid var(--border); }
+    .stat-row:last-child { border-bottom: none; }
+    .stat-val { font-family: monospace; color: var(--accent); font-size: 0.78rem; }
+
+    .btn { padding: 7px 14px; border: none; border-radius: 7px; font-size: 0.82rem; cursor: pointer; transition: background 0.15s; }
+    .btn-primary { background: #0891b2; color: #fff; }
+    .btn-primary:hover { background: #06b6d4; }
+    .btn-primary:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-secondary { background: var(--surface-2); color: var(--text); border: 1px solid var(--border); }
+    .btn-secondary:hover { border-color: var(--accent); }
+
+    select { background: var(--surface-2); border: 1px solid var(--border); color: var(--text); border-radius: 7px; padding: 6px 8px; font-size: 0.82rem; width: 100%; }
+    label { font-size: 0.75rem; color: var(--text-dim); display: block; margin-bottom: 4px; }
+
+    .config-row { display: flex; gap: 8px; align-items: flex-end; }
+    .config-row .field { flex: 1; }
+
+    .btn-group { display: flex; gap: 8px; flex-wrap: wrap; }
+
+    .log-content { font-family: monospace; font-size: 0.72rem; color: var(--text-dim); max-height: 180px; overflow-y: auto; white-space: pre-wrap; line-height: 1.6; }
+
+    .divider { height: 1px; background: var(--border); margin: 4px 0; }
+
+    /* 脚本注入进度与错误面板 */
+    .upload-phase { font-size: 0.72rem; color: var(--text-dim); margin-top: 8px; }
+    .upload-progress-track { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; margin-top: 6px; }
+    .upload-progress-fill { height: 100%; width: 0%; background: var(--accent); transition: width 0.2s; }
+    .upload-error-box { margin-top: 10px; padding: 8px; background: rgba(248,113,113,0.08); border: 1px solid rgba(248,113,113,0.35); border-radius: 7px; }
+    .upload-error-msg { font-size: 0.75rem; color: var(--red); line-height: 1.5; }
+    .upload-error-detail { font-family: monospace; font-size: 0.68rem; color: var(--text-dim); white-space: pre-wrap; margin-top: 6px; max-height: 140px; overflow-y: auto; }
+
+    /* 移动端适配 */
+    @media (max-width: 768px) {
+      .layout { flex-direction: column; height: auto; min-height: 100vh; }
+      .sidebar { position: fixed; top: 0; left: 0; width: 100%; height: 100%; z-index: 200; border-right: none; overflow-y: auto; transition: transform 0.3s; }
+      .sidebar.collapsed { transform: translateX(-100%); }
+      .sidebar-content { padding: 10px; gap: 10px; }
+      .toggle-btn { position: fixed; top: 10px; left: 10px; transform: none; border-radius: 8px; border: 1px solid var(--border); width: 36px; height: 36px; z-index: 100; }
+      .toggle-btn.shifted { left: 10px; }
+      .main { padding: 10px; min-height: 100vh; }
+      .video-wrap { border-radius: 10px; aspect-ratio: 4/3; }
+      .gesture-overlay { bottom: 8px; padding: 8px 14px; gap: 12px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-header">
+        <h1>瓦力 · 体感模仿</h1>
+        <button class="btn btn-secondary" id="collapseBtn" style="padding:4px 8px;font-size:0.75rem;">收起 ◀</button>
+      </div>
+      <div class="sidebar-content">
+        <!-- 连接状态 -->
+        <div class="card">
+          <div class="card-title">连接状态</div>
+          <div class="status-row"><div class="dot loading" id="modelDot"></div><span id="modelStatus">加载模型中…</span></div>
+          <div class="status-row"><div class="dot" id="connDot"></div><span id="connStatus">未连接</span></div>
+        </div>
+
+        <!-- 模型配置 -->
+        <div class="card">
+          <div class="card-title">模型配置</div>
+          <label for="modelType">MoveNet 变体</label>
+          <select id="modelType">
+            <option value="SINGLEPOSE_LIGHTNING">Lightning（极快）</option>
+            <option value="SINGLEPOSE_THUNDER" selected>Thunder（更准）</option>
+          </select>
+        </div>
+
+        <!-- 设备连接（USB 有线） -->
+        <div class="card">
+          <div class="card-title">设备连接</div>
+          <div class="btn-group">
+            <button class="btn btn-secondary" id="serialBtn">连接设备(USB)</button>
+          </div>
+          <div style="font-size:0.68rem;color:var(--text-dim);margin-top:8px;line-height:1.5;">用 USB 数据线把控制器接到电脑，点按钮后在弹窗选中对应串口。注入脚本前需先连接（或直接点注入，会自动弹选口）。</div>
+        </div>
+
+        <!-- 脚本注入 -->
+        <div class="card">
+          <div class="card-title">脚本注入</div>
+          <label for="containerSelect">注入目标容器</label>
+          <select id="containerSelect">
+            <option value="container1" selected>container1</option>
+            <option value="container2">container2</option>
+            <option value="container3">container3</option>
+            <option value="container4">container4</option>
+            <option value="container5">container5</option>
+          </select>
+          <div class="btn-group" style="margin-top:8px;">
+            <button class="btn btn-primary" id="uploadBtn">注入体感模仿程序</button>
+            <button class="btn btn-secondary" id="uploadCancelBtn" style="display:none;">取消</button>
+          </div>
+          <div class="upload-phase" id="uploadPhase"></div>
+          <div class="upload-progress-track" id="uploadProgressTrack" style="display:none;">
+            <div class="upload-progress-fill" id="uploadProgressFill"></div>
+          </div>
+          <div class="upload-error-box" id="uploadErrorBox" style="display:none;">
+            <div class="upload-error-msg" id="uploadErrorMsg"></div>
+            <div class="upload-error-detail" id="uploadErrorDetail"></div>
+          </div>
+          <div style="font-size:0.68rem;color:var(--text-dim);margin-top:8px;line-height:1.5;">把「体感模仿」程序写入设备容器（设备屏幕上显示为 瓦力体感模仿.py）。写入过程带 CRC 校验，失败不影响设备上的旧程序。</div>
+        </div>
+
+        <!-- 控制 -->
+        <div class="card">
+          <div class="card-title">控制</div>
+          <div class="btn-group">
+            <button class="btn btn-primary" id="startBtn" disabled>启动摄像头</button>
+          </div>
+        </div>
+
+        <!-- 状态数据 -->
+        <div class="card">
+          <div class="card-title">实时数据</div>
+          <div class="stat-row"><span>帧率</span><span class="stat-val" id="fps">—</span></div>
+          <div class="stat-row"><span>检测人体</span><span class="stat-val" id="detected">否</span></div>
+          <div class="stat-row"><span>平举检测</span><span class="stat-val" id="flatState">无</span></div>
+          <div class="stat-row"><span>已发送指令</span><span class="stat-val" id="mqttCount">0</span></div>
+          <div class="stat-row"><span>当前指令</span><span class="stat-val" id="currentCmd">—</span></div>
+        </div>
+
+        <div class="divider"></div>
+
+        <!-- 指令日志 -->
+        <div class="card" style="flex:1;min-height:120px;">
+          <div class="card-title">指令日志</div>
+          <div class="log-content" id="logContent">等待启动…</div>
+        </div>
+      </div>
+    </aside>
+
+    <button class="toggle-btn shifted" id="toggleBtn">▶</button>
+
+    <main class="main">
+      <div class="video-wrap">
+        <video id="video" playsinline muted></video>
+        <canvas id="canvas"></canvas>
+        <div class="placeholder" id="placeholder">点击左侧"启动摄像头"开始体感控制</div>
+      </div>
+      <div class="gesture-overlay">
+        <div class="arm-icon"><div class="arm-bar" id="leftBar"></div><span>举左手</span></div>
+        <div class="arm-icon"><div class="arm-bar" id="rightBar"></div><span>举右手</span></div>
+        <div class="arm-icon"><div class="arm-bar" id="leftFlatBar"></div><span>左平举</span></div>
+        <div class="arm-icon"><div class="arm-bar" id="rightFlatBar"></div><span>右平举</span></div>
+      </div>
+    </main>
+  </div>
+
+  <script src="vendor/tf.min.js"></script>
+  <script src="vendor/pose-detection.min.js"></script>
+  <script src="firmware.js"></script>
+  <script src="upload.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,29 @@
+# ===== 凭据与服务器配置（含敏感信息，严禁入库）=====
+id_ed25519
+id_ed25519.pub
+env.md
+setup-db.js
+schema.sql
+
+# ===== 系统/编辑器 =====
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+
+# ===== 运行产物 =====
+__pycache__/
+*.pyc
+node_modules/
+*.log
+nohup.out
+
+# ===== 备份文件 =====
+*.bak-*
+*.bak
+*.tmp
+
+# ===== 上传产物（线上由服务器动态生成）=====
+public/firmware.js

@@ -379,11 +379,14 @@
     // R：按 \x04 切帧读执行结果（§5.3-R，红线 1：禁止整段子串匹配）
     // paste: \x04(编译完) <stdout> \x04 <stderr> \x04 >
     // raw:   OK <stdout> \x04 <stderr> \x04 >
-    async readExecResult(mode) {
+    // compileTimeoutMs：raw 模式下 OK 在脚本整体执行完才发出——一次性脚本
+    //（exec）可能耗时远超注入安装脚本（如等 WiFi 回调），允许调用方放宽
+    async readExecResult(mode, compileTimeoutMs) {
+      const tCompile = compileTimeoutMs || T_COMPILE;
       if (mode === 'paste') {
-        await this.link.readUntil(frameEndMatcher, T_COMPILE, '等待编译完成帧', this.signal);
+        await this.link.readUntil(frameEndMatcher, tCompile, '等待编译完成帧', this.signal);
       } else {
-        await this.link.readUntil(textMatcher('OK'), T_COMPILE, '等待 OK 应答', this.signal);
+        await this.link.readUntil(textMatcher('OK'), tCompile, '等待 OK 应答', this.signal);
       }
       const stdout = await this.link.readUntil(frameEndMatcher, T_OUTPUT, '等待输出帧', this.signal);
       let stderr = [];
@@ -757,8 +760,103 @@
     }
   }
 
+  // ---------- 一次性脚本执行（raw REPL exec，不落盘） ----------
+  // 与 inject 共用协议层，但脚本只在 RAM 中编译执行、跑完即弃，
+  // 设备文件系统零残留。用于 WiFi 配网等临时维护动作。
+  // 脚本契约：末尾必须 print("EXEC_DONE") 收尾（见 execExit），stdout 原文返回调用方解析。
+
+  // 一次性脚本的失败恢复序列（与 inject 的差异：不 soft_reset——
+  // 临时脚本不改变文件系统，无需重启固件；退回 friendly REPL 即可，
+  // 也避免复位打断用户正在用的设备状态）
+  async function execExitRaw(link, signal) {
+    try { await link.write(new Uint8Array([CTRL_C, CTRL_C])); } catch (e) { /* ignore */ }
+    try { await link.write(new Uint8Array([CTRL_B])); } catch (e) { /* ignore */ }
+  }
+
+  /**
+   * 在设备上执行一次性 Python 脚本（RAM 执行，不写文件）。
+   * @param {Object} opts
+   * @param {SerialPort} opts.port     已打开的串口（生命周期归调用方）
+   * @param {string} opts.script       Python 源码；结尾约定 print("EXEC_DONE")
+   * @param {number} [opts.execTimeoutMs] 等待脚本执行完的上限，默认 30000
+   * @param {boolean} [opts.reboot]    执行完是否 soft_reset 复位设备（默认否：
+   *                                   仅退回 friendly REPL。临时脚本不改文件系统，
+   *                                   无需重启固件；需要固件重启后生效的动作才传 true）
+   * @param {AbortSignal} [opts.signal]
+   * @param {Function} [opts.onEvent]  {phase, detail}
+   * @returns {Promise<Object>} { ok, stdout, stderr, ms, mode, degraded }
+   *   ok 判定：识别到 EXEC_DONE 标记且无未捕获异常（红线 1：按帧判定，非子串碰运气）
+   */
+  async function exec(opts) {
+    const startedAt = Date.now();
+    const emit = opts.onEvent || (() => {});
+    const execTimeout = opts.execTimeoutMs || 30000;
+
+    if (!opts.script || !opts.script.trim()) {
+      return fail('BadTarget', { message: '脚本内容为空' }, null, startedAt);
+    }
+
+    const scriptBytes = new TextEncoder().encode(opts.script);
+    // 脚本可能比注入的安装脚本长（等回调的轮询循环），raw 模式上限放宽
+    if (scriptBytes.length > 16 * 1024) {
+      return fail('BadTarget', { message: '一次性脚本过大（>16KB）' }, null, startedAt);
+    }
+
+    const link = new SerialLink(opts.port);
+    try {
+      await link.start();
+    } catch (e) {
+      return fail('PortError', { message: '无法接管串口读写流: ' + e.message }, null, startedAt);
+    }
+    const proto = new MicroPyProtocol(link, opts);
+
+    try {
+      emit({ phase: 'HALTING', detail: '打断设备当前程序' });
+      await proto.halt();
+      emit({ phase: 'PROBING', detail: '探测设备能力' });
+      const cap = await proto.probePaste();
+      emit({ phase: 'PROBED', detail: cap.mode === 'paste' ? 'raw paste' : '兼容模式（256B 分组）' });
+
+      emit({ phase: 'TRANSFERRING', sent: 0, total: scriptBytes.length });
+      const onProgress = (sent, total) => emit({ phase: 'TRANSFERRING', sent, total });
+      if (cap.mode === 'paste') {
+        await proto.pasteTransfer(scriptBytes, cap.windowInc, onProgress);
+      } else {
+        await proto.rawTransfer(scriptBytes, onProgress);
+      }
+
+      emit({ phase: 'COMMITTING', detail: '等待脚本执行结果' });
+      // raw 模式的 OK 应答在脚本整体执行完才发出；一次性脚本可能耗时较长
+      //（如等 WiFi 回调），用 execTimeout 放宽首帧等待
+      const res = await proto.readExecResult(cap.mode, execTimeout);
+      emit({ phase: 'DONE', detail: '脚本执行完毕' });
+      // 成功路径同样要把设备拉出 raw REPL（否则设备停在 raw 态无人接管）
+      if (opts.reboot) {
+        emit({ phase: 'REBOOTING', detail: '复位设备' });
+        try { await proto.exitRawAndReboot(); } catch (e) { if (e.code === 'Cancelled') throw e; /* 横幅缺席不判失败 */ }
+      } else {
+        await execExitRaw(link, opts.signal);
+      }
+      return {
+        ok: res.stdout.includes('EXEC_DONE') && !res.stderr.trim(),
+        stdout: res.stdout,
+        stderr: res.stderr,
+        ms: Date.now() - startedAt,
+        mode: cap.mode,
+        degraded: proto.degraded.slice(),
+      };
+    } catch (e) {
+      const code = e.code || (e.name === 'AbortError' ? 'Cancelled' : 'PortError');
+      await execExitRaw(link, opts.signal);
+      return fail(code, { message: e.message }, link, startedAt);
+    } finally {
+      await link.release();
+    }
+  }
+
   window.FirmwareUploader = {
     inject,
+    exec,
     crc32,
     crc32hex,
     // 供测试/诊断

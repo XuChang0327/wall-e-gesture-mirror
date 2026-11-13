@@ -80,6 +80,13 @@
     .upload-error-msg { font-size: 0.75rem; color: var(--red); line-height: 1.5; }
     .upload-error-detail { font-family: monospace; font-size: 0.68rem; color: var(--text-dim); white-space: pre-wrap; margin-top: 6px; max-height: 140px; overflow-y: auto; }
 
+    /* WiFi 配置卡片 */
+    .input-field { background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: 7px; padding: 6px 8px; font-size: 0.82rem; width: 100%; }
+    .wifi-status { font-size: 0.72rem; color: var(--text-dim); margin-top: 8px; line-height: 1.5; }
+    .wifi-status.ok { color: var(--green); }
+    .wifi-status.err { color: var(--red); }
+    .wifi-status.busy { color: var(--yellow); }
+
     /* 移动端适配 */
     @media (max-width: 768px) {
       .layout { flex-direction: column; height: auto; min-height: 100vh; }
@@ -152,6 +159,23 @@
             <div class="upload-error-detail" id="uploadErrorDetail"></div>
           </div>
           <div style="font-size:0.68rem;color:var(--text-dim);margin-top:8px;line-height:1.5;">把「体感模仿」程序写入设备容器（设备屏幕上显示为 瓦力体感模仿.py）。写入过程带 CRC 校验，失败不影响设备上的旧程序。</div>
+        </div>
+
+        <!-- WiFi 配置 -->
+        <div class="card">
+          <div class="card-title">WiFi 配置</div>
+          <div style="margin-bottom:8px;">
+            <label for="wifiSsid">WiFi 名称</label>
+            <input type="text" id="wifiSsid" class="input-field" placeholder="如 Tala's iPhone" autocomplete="off">
+          </div>
+          <div style="margin-bottom:8px;">
+            <label for="wifiPwd">WiFi 密码</label>
+            <input type="password" id="wifiPwd" class="input-field" placeholder="密码" autocomplete="off">
+          </div>
+          <div class="btn-group">
+            <button class="btn btn-primary" id="wifiConnectBtn">连接 WiFi</button>
+          </div>
+          <div class="wifi-status" id="wifiStatus">临时连接：一次性执行，不在设备上保留任何文件；连上后固件会记住，下次开机自动连。</div>
         </div>
 
         <!-- 控制 -->

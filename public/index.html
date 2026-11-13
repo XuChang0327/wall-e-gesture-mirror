@@ -82,6 +82,10 @@
 
     /* WiFi 配置卡片 */
     .input-field { background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: 7px; padding: 6px 8px; font-size: 0.82rem; width: 100%; }
+    .pwd-wrap { position: relative; }
+    .pwd-wrap .input-field { padding-right: 32px; }
+    .pwd-toggle { position: absolute; right: 4px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; padding: 2px 5px; font-size: 0.85rem; line-height: 1; color: var(--text-dim); opacity: 0.7; }
+    .pwd-toggle:hover { opacity: 1; color: var(--text); }
     .wifi-status { font-size: 0.72rem; color: var(--text-dim); margin-top: 8px; line-height: 1.5; }
     .wifi-status.ok { color: var(--green); }
     .wifi-status.err { color: var(--red); }
@@ -166,11 +170,14 @@
           <div class="card-title">WiFi 配置</div>
           <div style="margin-bottom:8px;">
             <label for="wifiSsid">WiFi 名称</label>
-            <input type="text" id="wifiSsid" class="input-field" placeholder="如 Tala's iPhone" autocomplete="off">
+            <input type="text" id="wifiSsid" class="input-field" autocomplete="off">
           </div>
           <div style="margin-bottom:8px;">
             <label for="wifiPwd">WiFi 密码</label>
-            <input type="password" id="wifiPwd" class="input-field" placeholder="密码" autocomplete="off">
+            <div class="pwd-wrap">
+              <input type="password" id="wifiPwd" class="input-field" placeholder="密码" autocomplete="off">
+              <button type="button" class="pwd-toggle" id="wifiPwdToggle" title="显示/隐藏密码">👁</button>
+            </div>
           </div>
           <div class="btn-group">
             <button class="btn btn-primary" id="wifiConnectBtn">连接 WiFi</button>

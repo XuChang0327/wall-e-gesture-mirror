@@ -36,6 +36,7 @@ const uploadErrorMsg = document.getElementById('uploadErrorMsg');
 const uploadErrorDetail = document.getElementById('uploadErrorDetail');
 const wifiSsidInput = document.getElementById('wifiSsid');
 const wifiPwdInput = document.getElementById('wifiPwd');
+const wifiPwdToggle = document.getElementById('wifiPwdToggle');
 const wifiConnectBtn = document.getElementById('wifiConnectBtn');
 const wifiStatusEl = document.getElementById('wifiStatus');
 
@@ -598,6 +599,14 @@ async function runWifiConnect() {
 }
 
 wifiConnectBtn.addEventListener('click', () => { runWifiConnect(); });
+
+// 密码明文/密文切换（小眼睛）
+wifiPwdToggle.addEventListener('click', () => {
+  const show = wifiPwdInput.type === 'password';
+  wifiPwdInput.type = show ? 'text' : 'password';
+  wifiPwdToggle.textContent = show ? '🙈' : '👁';
+  wifiPwdInput.focus();
+});
 
 // ============ Command Dispatch ============
 async function publishCommand(cmd) {
